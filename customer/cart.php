@@ -111,7 +111,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $message_type = 'success';
         
     } elseif (isset($_POST['checkout'])) {
-        // Process checkout
+        // Redirect to Razorpay checkout
         $shipping_address = trim($_POST['shipping_address']);
         $payment_method = trim($_POST['payment_method']);
         
@@ -119,84 +119,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $message = "Please provide shipping address and payment method.";
             $message_type = 'error';
         } else {
-            // Get cart items
-            $cart_query = "SELECT c.*, p.name, p.price, p.stock_quantity 
-                          FROM cart c 
-                          JOIN products p ON c.product_id = p.id 
-                          WHERE c.user_id = ?";
-            $cart_stmt = $conn->prepare($cart_query);
-            $cart_stmt->bind_param("i", $user_id);
-            $cart_stmt->execute();
-            $cart_items = $cart_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            
-            if (empty($cart_items)) {
-                $message = "Your cart is empty.";
-                $message_type = 'error';
-            } else {
-                // Check stock availability
-                $stock_ok = true;
-                foreach ($cart_items as $item) {
-                    if ($item['quantity'] > $item['stock_quantity']) {
-                        $stock_ok = false;
-                        $message = "Insufficient stock for " . $item['name'] . ". Available: " . $item['stock_quantity'];
-                        break;
-                    }
-                }
-                
-                if ($stock_ok) {
-                    // Calculate total
-                    $total_amount = 0;
-                    foreach ($cart_items as $item) {
-                        $total_amount += $item['price'] * $item['quantity'];
-                    }
-                    
-                    // Start transaction
-                    $conn->begin_transaction();
-                    
-                    try {
-                        // Create order
-                        $order_stmt = $conn->prepare("INSERT INTO orders (user_id, total_amount, status, payment_method, payment_status, shipping_address) VALUES (?, ?, 'pending', ?, 'pending', ?)");
-                        $order_stmt->bind_param("idss", $user_id, $total_amount, $payment_method, $shipping_address);
-                        $order_stmt->execute();
-                        $order_id = $conn->insert_id;
-                        
-                        // Create order items and update stock
-                        foreach ($cart_items as $item) {
-                            // Insert order item
-                            $order_item_stmt = $conn->prepare("INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)");
-                            $order_item_stmt->bind_param("iiid", $order_id, $item['product_id'], $item['quantity'], $item['price']);
-                            $order_item_stmt->execute();
-                            
-                            // Update product stock
-                            $new_stock = $item['stock_quantity'] - $item['quantity'];
-                            $stock_stmt = $conn->prepare("UPDATE products SET stock_quantity = ? WHERE id = ?");
-                            $stock_stmt->bind_param("ii", $new_stock, $item['product_id']);
-                            $stock_stmt->execute();
-                        }
-                        
-                        // Clear cart
-                        $clear_cart_stmt = $conn->prepare("DELETE FROM cart WHERE user_id = ?");
-                        $clear_cart_stmt->bind_param("i", $user_id);
-                        $clear_cart_stmt->execute();
-                        
-                        // Commit transaction
-                        $conn->commit();
-                        
-                        $message = "Order placed successfully! Order ID: #" . $order_id;
-                        $message_type = 'success';
-                        
-                        // Redirect to orders page
-                        header("Location: my_orders.php?order_placed=1&order_id=" . $order_id);
-                        exit();
-                        
-                    } catch (Exception $e) {
-                        // Rollback transaction
-                        $conn->rollback();
-                        $message = "Error processing order: " . $e->getMessage();
-                        $message_type = 'error';
-                    }
-                }
-            }
+            // Redirect to Razorpay checkout page
+            header("Location: razorpay_checkout.php");
+            exit();
         }
     }
 }
@@ -374,24 +299,10 @@ while ($row = $cart_result->fetch_assoc()) {
             position: sticky;
             top: 20px;
             box-shadow: 0 15px 35px rgba(0,0,0,0.1);
-            border: 3px solid transparent;
-            background-clip: padding-box;
+            border: 3px solid;
+            border-image: var(--gradient-success) 1;
             position: relative;
-            overflow: hidden;
-        }
-
-        .checkout-summary::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            border-radius: 20px;
-            padding: 3px;
-            background: var(--gradient-success);
-            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-            mask-composite: exclude;
+            overflow: visible;
         }
 
         .btn {
@@ -705,16 +616,13 @@ while ($row = $cart_result->fetch_assoc()) {
                                         <label for="payment_method" class="form-label">Payment Method</label>
                                         <select class="form-select" id="payment_method" name="payment_method" required>
                                             <option value="">Select Payment Method</option>
-                                            <option value="Credit Card">Credit Card</option>
-                                            <option value="Debit Card">Debit Card</option>
-                                            <option value="PayPal">PayPal</option>
-                                            <option value="Bank Transfer">Bank Transfer</option>
+                                            <option value="Razorpay">Razorpay (Credit/Debit Card, UPI, Net Banking)</option>
                                             <option value="Cash on Delivery">Cash on Delivery</option>
                                         </select>
                                     </div>
                                     
                                     <button type="submit" name="checkout" class="btn btn-success w-100">
-                                        <i class="fas fa-credit-card me-2"></i>Proceed to Checkout
+                                        <i class="fas fa-credit-card me-2"></i>Proceed to Payment
                                     </button>
                                 </form>
                                 
